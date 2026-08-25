@@ -461,6 +461,14 @@ table.data-table td.num, table.data-table th.num { text-align: left; }
 .order-item .drag-handle { color: var(--color-text-faint); cursor: grab; }
 .order-item .name { flex: 1; font-weight: 600; }
 .order-item .count { font-size: var(--font-size-xs); color: var(--color-text-secondary); }
+.order-item input[type="checkbox"] { width: 17px; height: 17px; accent-color: var(--color-accent-600); cursor: pointer; flex-shrink: 0; }
+.order-item.table-row-total {
+  background: var(--color-accent-100);
+  border-color: var(--color-accent-100);
+  cursor: default;
+}
+.order-item.table-row-total .name { font-weight: 700; color: var(--color-accent-600); }
+.order-item.table-row-total .count { font-size: var(--font-size-xs); }
 .order-item .move-btns { display: flex; gap: 2px; }
 
 /* ---------- Report line block ---------- */

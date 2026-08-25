@@ -629,33 +629,133 @@ async function handleProductsFileSelected(file) {
 }
 
 /* ---------------------------------------------------------
-   8. تعریف گزارش کلی — line/group selection checkboxes
+   8. تعریف گزارش کلی — per-line group selection AND ordering
    --------------------------------------------------------- */
+// Working (unsaved) order per line while the user is editing this screen.
+// Each is an array of group ids: included groups in the exact order they
+// will appear in that line's report ("مجموع" is always appended last
+// separately, never stored in this array).
+const pendingLineOrder = { line1: [], line2: [] };
+
+function initPendingLineOrder(lineKey) {
+  const existingIds = new Set(state.groups.map((g) => g.id));
+  // keep previously-saved order, drop any group that no longer exists
+  pendingLineOrder[lineKey] = (state.lineGroups[lineKey] || []).filter((id) => existingIds.has(id));
+}
+
 function renderLineGroupCheckboxes() {
-  const sorted = [...state.groups].sort((a, b) => a.order - b.order);
+  const globalSorted = [...state.groups].sort((a, b) => a.order - b.order);
   ["line1", "line2"].forEach((lineKey) => {
-    const slot = $(`#${lineKey}-groups-slot`);
-    if (!slot) return;
-    if (!sorted.length) {
-      slot.innerHTML = `<div class="empty-state"><div class="icon">📦</div><div class="title">ابتدا گروه کالا تعریف کنید</div></div>`;
-      return;
-    }
-    const selected = new Set(state.lineGroups[lineKey] || []);
-    slot.innerHTML = sorted
-      .map(
-        (g) => `
+    initPendingLineOrder(lineKey);
+    renderLineOrderList(lineKey, globalSorted);
+  });
+}
+
+function renderLineOrderList(lineKey, globalSorted) {
+  const slot = $(`#${lineKey}-groups-slot`);
+  if (!slot) return;
+  if (!globalSorted.length) {
+    slot.innerHTML = `<div class="empty-state"><div class="icon">📦</div><div class="title">ابتدا گروه کالا تعریف کنید</div></div>`;
+    return;
+  }
+
+  const selectedIds = pendingLineOrder[lineKey];
+  const selectedSet = new Set(selectedIds);
+  const selectedGroups = selectedIds.map((id) => groupById(id)).filter(Boolean);
+  const unselectedGroups = globalSorted.filter((g) => !selectedSet.has(g.id));
+
+  const selectedHtml = selectedGroups.length
+    ? `<div class="order-list" data-line-order-list="${lineKey}">${selectedGroups
+        .map(
+          (g, idx) => `
+          <div class="order-item" draggable="true" data-line="${lineKey}" data-group-id="${g.id}">
+            <span class="drag-handle">⠿</span>
+            <input type="checkbox" data-line-toggle="${lineKey}" data-group-id="${g.id}" checked />
+            <span class="name">${escapeHtml(g.name)}</span>
+            <div class="move-btns">
+              <button class="btn btn-icon btn-sm btn-secondary" data-line-move="up" data-line="${lineKey}" data-group-id="${g.id}" ${idx === 0 ? "disabled" : ""}>▲</button>
+              <button class="btn btn-icon btn-sm btn-secondary" data-line-move="down" data-line="${lineKey}" data-group-id="${g.id}" ${idx === selectedGroups.length - 1 ? "disabled" : ""}>▼</button>
+            </div>
+          </div>`
+        )
+        .join("")}
+        <div class="order-item table-row-total" style="cursor:default">
+          <span class="name">مجموع</span>
+          <span class="count">همیشه آخرین ردیف گزارش</span>
+        </div>
+      </div>`
+    : `<div class="field-hint" style="margin-bottom:var(--space-3)">هنوز گروهی برای این لاین انتخاب نشده است</div>`;
+
+  const unselectedHtml = unselectedGroups.length
+    ? `<div class="card-section-label" style="margin-top:var(--space-4)">سایر گروه‌ها</div>
+       ${unselectedGroups
+         .map(
+           (g) => `
         <div class="checkbox-row">
-          <input type="checkbox" id="${lineKey}-chk-${g.id}" data-line="${lineKey}" data-group-id="${g.id}" ${selected.has(g.id) ? "checked" : ""} />
+          <input type="checkbox" id="${lineKey}-chk-${g.id}" data-line-toggle="${lineKey}" data-group-id="${g.id}" />
           <label for="${lineKey}-chk-${g.id}">${escapeHtml(g.name)}</label>
         </div>`
-      )
-      .join("");
+         )
+         .join("")}`
+    : "";
+
+  slot.innerHTML = `
+    <div class="field-hint" style="margin-bottom:var(--space-3)">با دستگیره ⠿ یا دکمه‌های ▲▼ ترتیب نمایش گروه‌ها در گزارش این لاین را تعیین کنید. ردیف «مجموع» همیشه آخرین ردیف باقی می‌ماند.</div>
+    ${selectedHtml}
+    ${unselectedHtml}`;
+
+  // toggle include/exclude
+  $all(`[data-line-toggle="${lineKey}"]`, slot).forEach((chk) => {
+    chk.addEventListener("change", () => {
+      const gid = Number(chk.dataset.groupId);
+      if (chk.checked) {
+        if (!pendingLineOrder[lineKey].includes(gid)) pendingLineOrder[lineKey].push(gid);
+      } else {
+        pendingLineOrder[lineKey] = pendingLineOrder[lineKey].filter((id) => id !== gid);
+      }
+      renderLineOrderList(lineKey, globalSorted);
+    });
+  });
+
+  // up/down reordering
+  $all(`[data-line-move]`, slot).forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const gid = Number(btn.dataset.groupId);
+      const arr = pendingLineOrder[lineKey];
+      const idx = arr.indexOf(gid);
+      const swapIdx = btn.dataset.lineMove === "up" ? idx - 1 : idx + 1;
+      if (idx < 0 || swapIdx < 0 || swapIdx >= arr.length) return;
+      [arr[idx], arr[swapIdx]] = [arr[swapIdx], arr[idx]];
+      renderLineOrderList(lineKey, globalSorted);
+    });
+  });
+
+  // drag & drop reordering
+  let dragId = null;
+  $all(".order-item[draggable='true']", slot).forEach((item) => {
+    item.addEventListener("dragstart", () => {
+      dragId = Number(item.dataset.groupId);
+      item.classList.add("dragging");
+    });
+    item.addEventListener("dragend", () => item.classList.remove("dragging"));
+    item.addEventListener("dragover", (e) => e.preventDefault());
+    item.addEventListener("drop", (e) => {
+      e.preventDefault();
+      const targetId = Number(item.dataset.groupId);
+      if (dragId === null || dragId === targetId) return;
+      const arr = pendingLineOrder[lineKey];
+      const fromIdx = arr.indexOf(dragId);
+      const toIdx = arr.indexOf(targetId);
+      if (fromIdx < 0 || toIdx < 0) return;
+      const [moved] = arr.splice(fromIdx, 1);
+      arr.splice(toIdx, 0, moved);
+      renderLineOrderList(lineKey, globalSorted);
+    });
   });
 }
 
 async function handleSaveLineGroups(lineKey) {
-  const checked = $all(`[data-line="${lineKey}"]:checked`).map((c) => Number(c.dataset.groupId));
-  state.lineGroups[lineKey] = checked;
+  state.lineGroups[lineKey] = [...pendingLineOrder[lineKey]];
   await setSetting("lineGroups", state.lineGroups);
   showToast(`تنظیمات ${lineKey === "line1" ? "لاین یک" : "لاین دو"} ذخیره شد`, "success");
 }
@@ -792,12 +892,19 @@ function computeSalesReport(rows, columnMap, lines, productMap) {
   return { ...result, undefinedCodes };
 }
 
-function buildLineReportRows(groupSumsExact, selectedGroupIds, groupOrderSorted) {
-  const orderedSelected = groupOrderSorted.filter((g) => selectedGroupIds.includes(g.id));
-  const rows = orderedSelected.map((g) => {
-    const exact = groupSumsExact[g.id] || 0;
-    return { groupId: g.id, name: g.name, exact, rounded: Math.round(exact) };
-  });
+/**
+ * Builds report rows in the exact order the user configured for this line
+ * (section 8 UI — "تعریف گزارش کلی"), NOT the global group-management order.
+ * "مجموع" is computed here but always rendered as the final row by the caller.
+ */
+function buildLineReportRows(groupSumsExact, selectedGroupIds) {
+  const rows = selectedGroupIds
+    .map((gid) => groupById(gid))
+    .filter(Boolean)
+    .map((g) => {
+      const exact = groupSumsExact[g.id] || 0;
+      return { groupId: g.id, name: g.name, exact, rounded: Math.round(exact) };
+    });
   const totalExact = rows.reduce((sum, r) => sum + r.exact, 0);
   const totalRounded = Math.round(totalExact);
   return { rows, totalExact, totalRounded };
@@ -872,9 +979,8 @@ async function handleGenerateReport() {
     currentSalesRows.rows, state.columnMap, state.lines, productMap
   );
 
-  const groupOrderSorted = [...state.groups].sort((a, b) => a.order - b.order);
-  const r1 = buildLineReportRows(line1.groupSums, state.lineGroups.line1, groupOrderSorted);
-  const r2 = buildLineReportRows(line2.groupSums, state.lineGroups.line2, groupOrderSorted);
+  const r1 = buildLineReportRows(line1.groupSums, state.lineGroups.line1);
+  const r2 = buildLineReportRows(line2.groupSums, state.lineGroups.line2);
 
   $("#report-loading").style.display = "none";
   renderFullReport({
