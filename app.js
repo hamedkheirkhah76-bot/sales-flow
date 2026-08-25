@@ -188,7 +188,7 @@ async function setSetting(key, value) {
 const state = {
   groups: [],           // [{id, name, order}]
   products: [],          // [{code, group, cartonQty}]
-  columnMap: { code: "", qty: "", carton: "", line: "", customer: "" },
+  columnMap: { code: "", qty: "", carton: "", line: "", customer: "", invoice: "" },
   lines: {
     line1: { label: "لاین یک", excelValue: "" },
     line2: { label: "لاین دو", excelValue: "" },
@@ -202,7 +202,9 @@ const state = {
 async function hydrateState() {
   state.groups = (await Store.getAll("groups")).sort((a, b) => a.order - b.order);
   state.products = await Store.getAll("products");
-  state.columnMap = await getSetting("columnMap", state.columnMap);
+  // shallow-merge over defaults so older saved settings (from before a field
+  // like "invoice" existed) don't lose the new key entirely.
+  state.columnMap = { ...state.columnMap, ...(await getSetting("columnMap", {})) };
   state.lines = await getSetting("lines", state.lines);
   state.lineGroups = await getSetting("lineGroups", state.lineGroups);
   state.fontScale = await getSetting("fontScale", 1.1);
@@ -241,21 +243,28 @@ function switchManagementTab(tabKey) {
 function renderGroupAddForm() {
   const slot = $("#group-add-form-slot");
   slot.innerHTML = `
-    <div class="row" style="margin-bottom: var(--space-5); display:none" id="group-add-row">
-      <div class="field" style="flex:1">
-        <input type="text" id="new-group-name" placeholder="نام گروه کالا را وارد کنید" />
-        <div class="field-error" id="group-add-error" style="display:none"></div>
+    <div style="margin-bottom: var(--space-5); display:none" id="group-add-row">
+      <div class="row">
+        <div class="field" style="flex:1">
+          <input type="text" id="new-group-name" placeholder="نام گروه کالا را وارد کنید" />
+          <div class="field-error" id="group-add-error" style="display:none"></div>
+        </div>
+        <button class="btn btn-primary" id="btn-confirm-add-group">افزودن</button>
+        <button class="btn btn-secondary" id="btn-cancel-add-group">انصراف</button>
       </div>
-      <button class="btn btn-primary" id="btn-confirm-add-group">افزودن</button>
-      <button class="btn btn-secondary" id="btn-cancel-add-group">انصراف</button>
+      <div class="checkbox-row">
+        <input type="checkbox" id="new-group-nonsellable" />
+        <label for="new-group-nonsellable">غیرقابل فروش (مثل استند) — این گروه هرگز جزو فروش و تعداد مشتری حساب نشود</label>
+      </div>
     </div>`;
 }
 
 function toggleGroupAddRow(show) {
   const row = $("#group-add-row");
-  row.style.display = show ? "flex" : "none";
+  row.style.display = show ? "block" : "none";
   if (show) {
     $("#new-group-name").value = "";
+    $("#new-group-nonsellable").checked = false;
     $("#group-add-error").style.display = "none";
     $("#new-group-name").focus();
   }
@@ -264,6 +273,7 @@ function toggleGroupAddRow(show) {
 async function handleAddGroup() {
   const input = $("#new-group-name");
   const errorEl = $("#group-add-error");
+  const nonSellable = $("#new-group-nonsellable").checked;
   const name = normalizeStr(input.value);
   if (!name) {
     errorEl.textContent = "نام گروه کالا را وارد کنید.";
@@ -277,12 +287,32 @@ async function handleAddGroup() {
     return;
   }
   const maxOrder = state.groups.reduce((m, g) => Math.max(m, g.order), -1);
-  const rec = { name, order: maxOrder + 1 };
+  const rec = { name, order: maxOrder + 1, nonSellable };
   const id = await Store.put("groups", rec);
   rec.id = id;
   state.groups.push(rec);
   toggleGroupAddRow(false);
   showToast("گروه کالا با موفقیت اضافه شد", "success");
+  renderGroupsList();
+  refreshAllGroupDependentUI();
+}
+
+async function handleToggleGroupNonSellable(id) {
+  const group = groupById(id);
+  if (!group) return;
+  group.nonSellable = !group.nonSellable;
+  await Store.put("groups", group);
+  if (group.nonSellable) {
+    // a group just marked non-sellable can no longer be part of any line's
+    // report definition — strip it out and persist the cleanup.
+    state.lineGroups.line1 = state.lineGroups.line1.filter((gid) => gid !== id);
+    state.lineGroups.line2 = state.lineGroups.line2.filter((gid) => gid !== id);
+    await setSetting("lineGroups", state.lineGroups);
+  }
+  showToast(
+    group.nonSellable ? "گروه به‌عنوان «غیرقابل فروش» علامت‌گذاری شد" : "گروه به فروش عادی بازگشت",
+    "success"
+  );
   renderGroupsList();
   refreshAllGroupDependentUI();
 }
@@ -305,11 +335,13 @@ function renderGroupsList() {
       <div class="order-item" draggable="true" data-group-id="${g.id}">
         <span class="drag-handle">⠿</span>
         <span class="name" data-open-group="${g.id}" style="cursor:pointer">${escapeHtml(g.name)}</span>
+        ${g.nonSellable ? `<span class="badge badge-neutral">غیرقابل فروش</span>` : ""}
         <span class="count">${productCountForGroup(g.id)} کالا</span>
         <div class="move-btns">
           <button class="btn btn-icon btn-sm btn-secondary" data-move="up" data-id="${g.id}" ${idx === 0 ? "disabled" : ""}>▲</button>
           <button class="btn btn-icon btn-sm btn-secondary" data-move="down" data-id="${g.id}" ${idx === sorted.length - 1 ? "disabled" : ""}>▼</button>
         </div>
+        <button class="btn btn-sm btn-secondary" data-toggle-nonsellable="${g.id}">${g.nonSellable ? "بازگشت به فروش عادی" : "غیرقابل فروش"}</button>
         <button class="btn btn-icon btn-sm btn-danger" data-delete-group="${g.id}">🗑</button>
       </div>`
     )
@@ -322,6 +354,10 @@ function renderGroupsList() {
   // delete buttons
   $all("[data-delete-group]", slot).forEach((btn) => {
     btn.addEventListener("click", () => handleDeleteGroup(Number(btn.dataset.deleteGroup)));
+  });
+  // non-sellable toggle
+  $all("[data-toggle-nonsellable]", slot).forEach((btn) => {
+    btn.addEventListener("click", () => handleToggleGroupNonSellable(Number(btn.dataset.toggleNonsellable)));
   });
   // open group products modal
   $all("[data-open-group]", slot).forEach((el) => {
@@ -638,13 +674,15 @@ async function handleProductsFileSelected(file) {
 const pendingLineOrder = { line1: [], line2: [] };
 
 function initPendingLineOrder(lineKey) {
-  const existingIds = new Set(state.groups.map((g) => g.id));
-  // keep previously-saved order, drop any group that no longer exists
-  pendingLineOrder[lineKey] = (state.lineGroups[lineKey] || []).filter((id) => existingIds.has(id));
+  // keep previously-saved order, drop any group that no longer exists or
+  // has since been marked "غیرقابل فروش" (non-sellable groups can never
+  // contribute to a report, so they don't belong in a line's definition).
+  const sellableIds = new Set(state.groups.filter((g) => !g.nonSellable).map((g) => g.id));
+  pendingLineOrder[lineKey] = (state.lineGroups[lineKey] || []).filter((id) => sellableIds.has(id));
 }
 
 function renderLineGroupCheckboxes() {
-  const globalSorted = [...state.groups].sort((a, b) => a.order - b.order);
+  const globalSorted = [...state.groups].filter((g) => !g.nonSellable).sort((a, b) => a.order - b.order);
   ["line1", "line2"].forEach((lineKey) => {
     initPendingLineOrder(lineKey);
     renderLineOrderList(lineKey, globalSorted);
@@ -769,6 +807,7 @@ function loadSettingsFormFromState() {
   $("#col-carton").value = state.columnMap.carton || "";
   $("#col-line").value = state.columnMap.line || "";
   $("#col-customer").value = state.columnMap.customer || "";
+  $("#col-invoice").value = state.columnMap.invoice || "";
   $("#line1-excel-value").value = state.lines.line1.excelValue || "";
   $("#line2-excel-value").value = state.lines.line2.excelValue || "";
   $all("#font-size-tabs .tab-btn").forEach((b) =>
@@ -783,6 +822,7 @@ async function handleSaveColumns() {
     carton: { input: $("#col-carton"), label: "تعداد در کارتن" },
     line: { input: $("#col-line"), label: "لاین" },
     customer: { input: $("#col-customer"), label: "کد مشتری" },
+    invoice: { input: $("#col-invoice"), label: "شماره پیش‌فاکتور" },
   };
   const errorSlot = $("#columns-error-slot");
   errorSlot.innerHTML = "";
@@ -839,7 +879,7 @@ function getFirstSheetInfo(workbook) {
 }
 
 function validateColumnsExist(range, columnMap) {
-  const labels = { code: "کد کالا", qty: "تعداد فروش", carton: "تعداد در کارتن", line: "لاین", customer: "کد مشتری" };
+  const labels = { code: "کد کالا", qty: "تعداد فروش", carton: "تعداد در کارتن", line: "لاین", customer: "کد مشتری", invoice: "شماره پیش‌فاکتور" };
   for (const key of Object.keys(columnMap)) {
     const letter = columnMap[key];
     if (!letter) return { ok: false, field: labels[key], letter };
@@ -854,7 +894,17 @@ function validateColumnsExist(range, columnMap) {
  * customer counts, and the set of undefined product codes encountered.
  * Rounding is intentionally NOT applied here (section 22/38 of spec).
  */
-function computeSalesReport(rows, columnMap, lines, productMap) {
+/**
+ * Computes exact (unrounded) per-group sums, per-line totals, unique
+ * customer counts, and the set of undefined product codes encountered.
+ * Rounding is intentionally NOT applied here (section 22/38 of spec).
+ *
+ * `groupsById` maps groupId -> group record, used to detect groups marked
+ * "غیرقابل فروش" (non-sellable, e.g. display stands) — rows for such
+ * products are excluded entirely: not in any group sum, not in the line
+ * total, and not counted toward unique customers either.
+ */
+function computeSalesReport(rows, columnMap, lines, productMap, groupsById) {
   const result = {
     line1: { groupSums: {}, customers: new Set() },
     line2: { groupSums: {}, customers: new Set() },
@@ -862,17 +912,28 @@ function computeSalesReport(rows, columnMap, lines, productMap) {
   const undefinedCodes = new Set();
 
   for (const row of rows) {
+    // پیش‌فاکتور تسویه‌نشده (مقدار ستون برابر صفر) یعنی فاکتور نهایی نشده و
+    // اصلاً جزو فروش نیست — این سطر باید کاملاً از گزارش کنار گذاشته شود
+    // (نه در جمع گروه‌ها، نه در تعداد مشتری، نه در کدهای تعریف‌نشده).
+    const invoiceNum = toPersianSafeNumber(row[columnMap.invoice]);
+    if (invoiceNum === 0) continue;
+
     const lineVal = normalizeStr(row[columnMap.line]);
     let lineKey = null;
     if (lineVal === lines.line1.excelValue) lineKey = "line1";
     else if (lineVal === lines.line2.excelValue) lineKey = "line2";
     if (!lineKey) continue; // other lines are ignored entirely
 
+    const code = normalizeStr(row[columnMap.code]);
+    const product = productMap.get(code);
+
+    // کالاهای گروه «غیرقابل فروش» (مثل استند) هرگز جزو فروش نیستند —
+    // نه در جمع گروه‌ها، نه در مجموع لاین، نه در تعداد مشتری.
+    if (product && groupsById.get(product.group)?.nonSellable) continue;
+
     const customerVal = normalizeStr(row[columnMap.customer]);
     if (customerVal) result[lineKey].customers.add(customerVal);
 
-    const code = normalizeStr(row[columnMap.code]);
-    const product = productMap.get(code);
     if (!product) {
       if (code) undefinedCodes.add(code);
       continue; // row not calculated further — no group is guessed
@@ -975,8 +1036,9 @@ async function handleGenerateReport() {
   await new Promise((r) => setTimeout(r, 30)); // let loading paint before heavy sync work
 
   const productMap = new Map(state.products.map((p) => [p.code, p]));
+  const groupsById = new Map(state.groups.map((g) => [g.id, g]));
   const { line1, line2, undefinedCodes } = computeSalesReport(
-    currentSalesRows.rows, state.columnMap, state.lines, productMap
+    currentSalesRows.rows, state.columnMap, state.lines, productMap, groupsById
   );
 
   const r1 = buildLineReportRows(line1.groupSums, state.lineGroups.line1);
@@ -1081,7 +1143,7 @@ function populateSingleReportSelectors() {
   const groupSel = $("#single-group-select");
   if (!lineSel || !groupSel) return;
   lineSel.innerHTML = `<option value="line1">لاین یک</option><option value="line2">لاین دو</option>`;
-  const sorted = [...state.groups].sort((a, b) => a.order - b.order);
+  const sorted = [...state.groups].filter((g) => !g.nonSellable).sort((a, b) => a.order - b.order);
   groupSel.innerHTML = sorted.length
     ? sorted.map((g) => `<option value="${g.id}">${escapeHtml(g.name)}</option>`).join("")
     : `<option value="">— گروهی تعریف نشده —</option>`;
@@ -1109,7 +1171,8 @@ function handleSingleReport() {
   }
 
   const productMap = new Map(state.products.map((p) => [p.code, p]));
-  const { line1, line2 } = computeSalesReport(currentSalesRows.rows, state.columnMap, state.lines, productMap);
+  const groupsById = new Map(state.groups.map((g) => [g.id, g]));
+  const { line1, line2 } = computeSalesReport(currentSalesRows.rows, state.columnMap, state.lines, productMap, groupsById);
   const target = lineKey === "line1" ? line1 : line2;
   const exact = target.groupSums[groupId] || 0;
   const rounded = Math.round(exact);
