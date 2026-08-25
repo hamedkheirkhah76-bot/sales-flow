@@ -1,0 +1,27 @@
+{
+  "name": "SalesFlow",
+  "short_name": "SalesFlow",
+  "description": "SalesFlow — Smart Sales Reporting — سیستم گزارش فروش",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "landscape",
+  "background_color": "#f5f7fa",
+  "theme_color": "#101b2d",
+  "dir": "rtl",
+  "lang": "fa",
+  "icons": [
+    {
+      "src": "assets/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "assets/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

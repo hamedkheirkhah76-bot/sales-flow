@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+<title>SalesFlow | سیستم گزارش فروش</title>
+<meta name="description" content="SalesFlow — Smart Sales Reporting — سیستم گزارش فروش" />
+<meta name="theme-color" content="#101b2d" />
+<link rel="manifest" href="manifest.json" />
+<link rel="icon" href="assets/favicon.png" type="image/png" />
+<link rel="apple-touch-icon" href="assets/icon-192.png" />
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+<div id="app-shell">
+
+  <!-- ===================== SIDEBAR ===================== -->
+  <aside class="sidebar">
+    <div class="sidebar-brand">
+      <img src="assets/icon-192.png" alt="SalesFlow" />
+      <div class="sidebar-brand-text">
+        <span class="sidebar-brand-name">SalesFlow</span>
+        <span class="sidebar-brand-tagline">Smart Sales Reporting</span>
+      </div>
+    </div>
+    <div class="sidebar-divider"></div>
+    <nav class="sidebar-nav">
+      <button class="sidebar-nav-item active" data-view="reports">
+        <span class="icon">📊</span><span class="label">گزارش‌گیری</span>
+      </button>
+      <button class="sidebar-nav-item" data-view="management">
+        <span class="icon">📦</span><span class="label">مدیریت</span>
+      </button>
+      <button class="sidebar-nav-item" data-view="settings">
+        <span class="icon">⚙️</span><span class="label">تنظیمات</span>
+      </button>
+    </nav>
+    <div class="sidebar-footer">سیستم گزارش فروش · نسخه ۱٫۰</div>
+  </aside>
+
+  <!-- ===================== MAIN ===================== -->
+  <div class="main">
+    <header class="topbar">
+      <div>
+        <div class="topbar-title" id="topbar-title">گزارش‌گیری</div>
+        <div class="topbar-sub" id="topbar-sub">تولید گزارش فروش از فایل روزانه</div>
+      </div>
+      <div class="topbar-actions" id="topbar-actions"></div>
+    </header>
+
+    <div class="view-scroll">
+
+      <!-- ===================== VIEW: REPORTS ===================== -->
+      <section class="view active" id="view-reports">
+
+        <!-- گزارش کلی -->
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <div class="card-title">گزارش کلی</div>
+              <div class="card-subtitle">فایل فروش روزانه را انتخاب کنید و گزارش را تولید کنید</div>
+            </div>
+          </div>
+
+          <div class="stack">
+            <div class="file-drop" id="sales-file-drop">
+              <input type="file" id="sales-file-input" accept=".xlsx,.xls" style="display:none" />
+              <button class="btn btn-secondary" id="btn-pick-sales-file">📁 انتخاب فایل فروش</button>
+              <div class="file-drop-status" id="sales-file-status"></div>
+            </div>
+
+            <div id="sales-file-warning-slot"></div>
+
+            <div class="row">
+              <button class="btn btn-primary" id="btn-generate-report" disabled>📊 تولید گزارش</button>
+              <span class="loading-row" id="report-loading" style="display:none">
+                <span class="spinner dark"></span> در حال محاسبه گزارش...
+              </span>
+            </div>
+
+            <div id="undefined-codes-alert-slot"></div>
+
+            <div id="report-output">
+              <div class="empty-state">
+                <div class="icon">📄</div>
+                <div class="title">هنوز گزارشی تولید نشده است</div>
+                <div>فایل فروش را انتخاب کرده و روی «تولید گزارش» کلیک کنید</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- گزارش تکی -->
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <div class="card-title">گزارش تکی</div>
+              <div class="card-subtitle">مشاهده فروش یک گروه کالا در یک لاین مشخص</div>
+            </div>
+          </div>
+
+          <div class="form-grid">
+            <div class="field">
+              <label>لاین</label>
+              <select id="single-line-select"></select>
+            </div>
+            <div class="field">
+              <label>گروه کالا</label>
+              <select id="single-group-select"></select>
+            </div>
+          </div>
+
+          <div class="row" style="margin-top: var(--space-4)">
+            <button class="btn btn-primary" id="btn-single-report">🔍 نمایش گزارش</button>
+          </div>
+
+          <div id="single-report-output" style="margin-top: var(--space-5)"></div>
+        </div>
+
+      </section>
+
+      <!-- ===================== VIEW: MANAGEMENT ===================== -->
+      <section class="view" id="view-management">
+
+        <div class="tabs" id="management-tabs">
+          <button class="tab-btn active" data-mtab="groups">گروه کالاها</button>
+          <button class="tab-btn" data-mtab="products">کد کالاها</button>
+          <button class="tab-btn" data-mtab="report-def">تعریف گزارش کلی</button>
+        </div>
+
+        <!-- --- گروه کالاها --- -->
+        <div class="mtab-panel" id="mtab-groups">
+          <div class="card">
+            <div class="card-header">
+              <div>
+                <div class="card-title">گروه کالاها</div>
+                <div class="card-subtitle">ترتیب گروه‌ها در گزارش‌ها همین ترتیب خواهد بود</div>
+              </div>
+              <button class="btn btn-primary" id="btn-add-group">+ افزودن گروه کالا</button>
+            </div>
+            <div id="group-add-form-slot"></div>
+            <div id="groups-list-slot">
+              <div class="empty-state">
+                <div class="icon">📦</div>
+                <div class="title">هنوز گروهی ثبت نشده است</div>
+                <div>با دکمه «افزودن گروه کالا» شروع کنید</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- --- کد کالاها --- -->
+        <div class="mtab-panel" id="mtab-products" style="display:none">
+          <div class="card">
+            <div class="card-header">
+              <div>
+                <div class="card-title">ورود کالا</div>
+                <div class="card-subtitle">از فایل Excel یا به‌صورت دستی کالا وارد کنید</div>
+              </div>
+            </div>
+            <div class="tabs" id="product-entry-tabs">
+              <button class="tab-btn active" data-ptab="excel">ورود از Excel</button>
+              <button class="tab-btn" data-ptab="manual">ورود دستی</button>
+            </div>
+
+            <div id="ptab-excel" style="margin-top: var(--space-5)">
+              <div class="file-drop" id="products-file-drop">
+                <input type="file" id="products-file-input" accept=".xlsx,.xls" style="display:none" />
+                <button class="btn btn-secondary" id="btn-pick-products-file">📁 انتخاب فایل Excel کالا</button>
+                <div class="field-hint" style="margin-top:var(--space-3)">ستون‌ها به ترتیب: کد کالا | گروه کالا | تعداد در کارتن</div>
+                <div class="file-drop-status" id="products-file-status"></div>
+              </div>
+            </div>
+
+            <div id="ptab-manual" style="display:none; margin-top: var(--space-5)">
+              <div class="form-grid">
+                <div class="field">
+                  <label>کد کالا</label>
+                  <input type="text" id="manual-product-code" placeholder="مثلاً 2222" />
+                </div>
+                <div class="field">
+                  <label>گروه کالا</label>
+                  <select id="manual-product-group"></select>
+                </div>
+                <div class="field">
+                  <label>تعداد در کارتن</label>
+                  <input type="number" id="manual-product-carton" min="0" step="1" placeholder="مثلاً 12" />
+                </div>
+              </div>
+              <div id="manual-product-error-slot"></div>
+              <div class="row" style="margin-top: var(--space-4)">
+                <button class="btn btn-primary" id="btn-save-manual-product">ذخیره کالا</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-header">
+              <div>
+                <div class="card-title">لیست کالاها</div>
+                <div class="card-subtitle" id="products-count-sub">۰ کالا ثبت شده</div>
+              </div>
+              <div class="search-input-wrap" style="width:260px">
+                <input type="text" id="products-search" placeholder="جستجوی کد یا گروه..." />
+                <span class="icon">🔍</span>
+              </div>
+            </div>
+            <div id="products-table-slot">
+              <div class="empty-state">
+                <div class="icon">🧾</div>
+                <div class="title">هنوز کالایی ثبت نشده است</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- --- تعریف گزارش کلی --- -->
+        <div class="mtab-panel" id="mtab-report-def" style="display:none">
+          <div class="grid-2">
+            <div class="card">
+              <div class="card-header">
+                <div class="card-title"><span class="line-dot line1"></span> تنظیمات لاین یک</div>
+              </div>
+              <div id="line1-groups-slot"></div>
+              <div class="row" style="margin-top: var(--space-4)">
+                <button class="btn btn-primary" id="btn-save-line1-def">ذخیره تنظیمات لاین یک</button>
+              </div>
+            </div>
+            <div class="card">
+              <div class="card-header">
+                <div class="card-title"><span class="line-dot line2"></span> تنظیمات لاین دو</div>
+              </div>
+              <div id="line2-groups-slot"></div>
+              <div class="row" style="margin-top: var(--space-4)">
+                <button class="btn btn-primary" id="btn-save-line2-def">ذخیره تنظیمات لاین دو</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </section>
+
+      <!-- ===================== VIEW: SETTINGS ===================== -->
+      <section class="view" id="view-settings">
+
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <div class="card-title">تنظیمات ستون‌های فایل فروش</div>
+              <div class="card-subtitle">حرف ستون مربوطه را در فایل Excel روزانه وارد کنید</div>
+            </div>
+          </div>
+          <div class="form-grid">
+            <div class="field">
+              <label>کد کالا</label>
+              <input type="text" id="col-code" maxlength="3" placeholder="مثلاً C" />
+            </div>
+            <div class="field">
+              <label>تعداد فروش</label>
+              <input type="text" id="col-qty" maxlength="3" placeholder="مثلاً F" />
+            </div>
+            <div class="field">
+              <label>تعداد در کارتن</label>
+              <input type="text" id="col-carton" maxlength="3" placeholder="مثلاً G" />
+            </div>
+            <div class="field">
+              <label>لاین</label>
+              <input type="text" id="col-line" maxlength="3" placeholder="مثلاً H" />
+            </div>
+            <div class="field">
+              <label>کد مشتری</label>
+              <input type="text" id="col-customer" maxlength="3" placeholder="مثلاً B" />
+            </div>
+          </div>
+          <div id="columns-error-slot"></div>
+          <div class="row" style="margin-top: var(--space-5)">
+            <button class="btn btn-primary" id="btn-save-columns">💾 ذخیره تنظیمات</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <div class="card-title">تعریف لاین‌ها</div>
+              <div class="card-subtitle">مقدار دقیق متن لاین همان‌طور که در فایل Excel نوشته شده وارد شود</div>
+            </div>
+          </div>
+          <div class="form-grid">
+            <div class="field">
+              <label><span class="line-dot line1"></span> لاین یک — مقدار دقیق Excel</label>
+              <input type="text" id="line1-excel-value" placeholder="مثلاً لاین 1" />
+            </div>
+            <div class="field">
+              <label><span class="line-dot line2"></span> لاین دو — مقدار دقیق Excel</label>
+              <input type="text" id="line2-excel-value" placeholder="مثلاً لاین 2" />
+            </div>
+          </div>
+          <div class="row" style="margin-top: var(--space-5)">
+            <button class="btn btn-primary" id="btn-save-lines">💾 ذخیره لاین‌ها</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <div class="card-title">ظاهر برنامه</div>
+              <div class="card-subtitle">اندازه متن برنامه را متناسب با نمایشگر خود تنظیم کنید</div>
+            </div>
+          </div>
+          <div class="card-section-label">اندازه متن</div>
+          <div class="tabs" id="font-size-tabs">
+            <button class="tab-btn" data-font-scale="1">کوچک · ۱۰۰٪</button>
+            <button class="tab-btn active" data-font-scale="1.1">متوسط · ۱۱۰٪</button>
+            <button class="tab-btn" data-font-scale="1.2">بزرگ · ۱۲۰٪</button>
+          </div>
+        </div>
+
+      </section>
+
+    </div>
+  </div>
+</div>
+
+<div id="toast-region"></div>
+<div id="modal-region"></div>
+
+<script src="xlsx.full.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
