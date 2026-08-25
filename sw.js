@@ -1,7 +1,7 @@
 /* SalesFlow Service Worker
    Caches the app shell for offline use. */
 
-const CACHE_VERSION = "salesflow-v5";
+const CACHE_VERSION = "salesflow-v6";
 const CORE_ASSETS = [
   "./",
   "./index.html",
@@ -19,7 +19,7 @@ const CORE_ASSETS = [
 ];
 
 const SALESFLOW_PATCH = `
-/* SalesFlow v5 compatibility patch: normalize Excel text/codes before matching. */
+/* SalesFlow v6 compatibility patch: normalize Excel text/codes before matching. */
 (function () {
   const originalComputeSalesReport = window.computeSalesReport;
   if (typeof originalComputeSalesReport !== "function") return;
@@ -69,6 +69,19 @@ const SALESFLOW_PATCH = `
 })();
 `;
 
+function patchedResponse(response) {
+  return response.text().then((text) => {
+    const headers = new Headers(response.headers);
+    headers.delete("content-encoding");
+    headers.delete("content-length");
+    return new Response(text + "\n" + SALESFLOW_PATCH, {
+      status: response.status,
+      statusText: response.statusText,
+      headers,
+    });
+  });
+}
+
 self.addEventListener("install", (event) => {
   event.waitUntil(
     caches.open(CACHE_VERSION).then((cache) => cache.addAll(CORE_ASSETS)).then(() => self.skipWaiting())
@@ -89,15 +102,7 @@ self.addEventListener("fetch", (event) => {
   event.respondWith(
     caches.match(event.request).then((cached) => {
       if (cached) {
-        if (new URL(event.request.url).pathname.endsWith("/app.js")) {
-          return cached.text().then((text) =>
-            new Response(text + "\n" + SALESFLOW_PATCH, {
-              status: cached.status,
-              statusText: cached.statusText,
-              headers: cached.headers,
-            })
-          );
-        }
+        if (new URL(event.request.url).pathname.endsWith("/app.js")) return patchedResponse(cached);
         return cached;
       }
 
@@ -107,16 +112,7 @@ self.addEventListener("fetch", (event) => {
             const clone = response.clone();
             caches.open(CACHE_VERSION).then((cache) => cache.put(event.request, clone));
           }
-
-          if (new URL(event.request.url).pathname.endsWith("/app.js")) {
-            return response.text().then((text) =>
-              new Response(text + "\n" + SALESFLOW_PATCH, {
-                status: response.status,
-                statusText: response.statusText,
-                headers: response.headers,
-              })
-            );
-          }
+          if (new URL(event.request.url).pathname.endsWith("/app.js")) return patchedResponse(response);
           return response;
         })
         .catch(() => cached);
