@@ -1,9 +1,7 @@
 /* SalesFlow Service Worker
-   Caches the app shell for offline use. Icon files are referenced only
-   by their fixed filenames (assets/icon-192.png, icon-512.png,
-   favicon.png) — replacing their content later requires no change here. */
+   Caches the app shell for offline use. */
 
-const CACHE_VERSION = "salesflow-v4";
+const CACHE_VERSION = "salesflow-v5";
 const CORE_ASSETS = [
   "./",
   "./index.html",
@@ -19,6 +17,57 @@ const CORE_ASSETS = [
   "./assets/icon-512.png",
   "./assets/favicon.png",
 ];
+
+const SALESFLOW_PATCH = `
+/* SalesFlow v5 compatibility patch: normalize Excel text/codes before matching. */
+(function () {
+  const originalComputeSalesReport = window.computeSalesReport;
+  if (typeof originalComputeSalesReport !== "function") return;
+
+  function normalizeCell(value) {
+    if (value === null || value === undefined) return "";
+    if (typeof value === "number") return value;
+    let s = String(value)
+      .replace(/[يى]/g, "ی")
+      .replace(/[ك]/g, "ک")
+      .replace(/[ۀة]/g, "ه")
+      .replace(/[\u200c\u200d\u200e\u200f]/g, "")
+      .replace(/[۰-۹]/g, (d) => "۰۱۲۳۴۵۶۷۸۹".indexOf(d))
+      .replace(/[٠-٩]/g, (d) => "٠١٢٣٤٥٦٧٨٩".indexOf(d))
+      .trim();
+    s = s.replace(/,/g, "");
+    if (/^[+-]?\d+\.0+$/.test(s)) s = s.replace(/\.0+$/, "");
+    return s;
+  }
+
+  window.computeSalesReport = function (rows, columnMap, lines, productMap, groupsById) {
+    const normalizedLines = {
+      ...lines,
+      line1: { ...lines.line1, excelValue: normalizeCell(lines.line1 && lines.line1.excelValue) },
+      line2: { ...lines.line2, excelValue: normalizeCell(lines.line2 && lines.line2.excelValue) },
+    };
+
+    const normalizedRows = rows.map((row) => {
+      const copy = { ...row };
+      for (const key of Object.keys(copy)) copy[key] = normalizeCell(copy[key]);
+      return copy;
+    });
+
+    const normalizedProductMap = new Map();
+    for (const [key, product] of productMap.entries()) {
+      normalizedProductMap.set(normalizeCell(key), product);
+    }
+
+    return originalComputeSalesReport(
+      normalizedRows,
+      columnMap,
+      normalizedLines,
+      normalizedProductMap,
+      groupsById
+    );
+  };
+})();
+`;
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -36,14 +85,37 @@ self.addEventListener("activate", (event) => {
 
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
+
   event.respondWith(
     caches.match(event.request).then((cached) => {
-      if (cached) return cached;
+      if (cached) {
+        if (new URL(event.request.url).pathname.endsWith("/app.js")) {
+          return cached.text().then((text) =>
+            new Response(text + "\n" + SALESFLOW_PATCH, {
+              status: cached.status,
+              statusText: cached.statusText,
+              headers: cached.headers,
+            })
+          );
+        }
+        return cached;
+      }
+
       return fetch(event.request)
         .then((response) => {
           if (response && response.status === 200 && response.type === "basic") {
             const clone = response.clone();
             caches.open(CACHE_VERSION).then((cache) => cache.put(event.request, clone));
+          }
+
+          if (new URL(event.request.url).pathname.endsWith("/app.js")) {
+            return response.text().then((text) =>
+              new Response(text + "\n" + SALESFLOW_PATCH, {
+                status: response.status,
+                statusText: response.statusText,
+                headers: response.headers,
+              })
+            );
           }
           return response;
         })
