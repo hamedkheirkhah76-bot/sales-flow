@@ -172,14 +172,6 @@ const Store = {
       req.onerror = (e) => reject(e.target.error);
     });
   },
-  async clear(storeName) {
-    const store = await txStore(storeName, "readwrite");
-    return new Promise((resolve, reject) => {
-      const req = store.clear();
-      req.onsuccess = () => resolve();
-      req.onerror = (e) => reject(e.target.error);
-    });
-  },
 };
 
 async function getSetting(key, fallback) {
@@ -264,10 +256,6 @@ function renderGroupAddForm() {
         <input type="checkbox" id="new-group-nonsellable" />
         <label for="new-group-nonsellable">غیرقابل فروش (مثل استند) — این گروه هرگز جزو فروش و تعداد مشتری حساب نشود</label>
       </div>
-      <div class="checkbox-row">
-        <input type="checkbox" id="new-group-sellbyunit" />
-        <label for="new-group-sellbyunit">فروش به قوطی — گزارش این گروه با واحد کوچک (تعداد خام) محاسبه شود، نه تقسیم بر تعداد در کارتن</label>
-      </div>
     </div>`;
 }
 
@@ -277,7 +265,6 @@ function toggleGroupAddRow(show) {
   if (show) {
     $("#new-group-name").value = "";
     $("#new-group-nonsellable").checked = false;
-    $("#new-group-sellbyunit").checked = false;
     $("#group-add-error").style.display = "none";
     $("#new-group-name").focus();
   }
@@ -287,7 +274,6 @@ async function handleAddGroup() {
   const input = $("#new-group-name");
   const errorEl = $("#group-add-error");
   const nonSellable = $("#new-group-nonsellable").checked;
-  const sellByUnit = $("#new-group-sellbyunit").checked;
   const name = normalizeStr(input.value);
   if (!name) {
     errorEl.textContent = "نام گروه کالا را وارد کنید.";
@@ -301,7 +287,7 @@ async function handleAddGroup() {
     return;
   }
   const maxOrder = state.groups.reduce((m, g) => Math.max(m, g.order), -1);
-  const rec = { name, order: maxOrder + 1, nonSellable, sellByUnit };
+  const rec = { name, order: maxOrder + 1, nonSellable };
   const id = await Store.put("groups", rec);
   rec.id = id;
   state.groups.push(rec);
@@ -331,18 +317,6 @@ async function handleToggleGroupNonSellable(id) {
   refreshAllGroupDependentUI();
 }
 
-async function handleToggleGroupSellByUnit(id) {
-  const group = groupById(id);
-  if (!group) return;
-  group.sellByUnit = !group.sellByUnit;
-  await Store.put("groups", group);
-  showToast(
-    group.sellByUnit ? "گروه به‌صورت «فروش به قوطی» محاسبه می‌شود" : "گروه به محاسبه بر اساس کارتن بازگشت",
-    "success"
-  );
-  renderGroupsList();
-}
-
 function renderGroupsList() {
   const slot = $("#groups-list-slot");
   if (!state.groups.length) {
@@ -362,13 +336,11 @@ function renderGroupsList() {
         <span class="drag-handle">⠿</span>
         <span class="name" data-open-group="${g.id}" style="cursor:pointer">${escapeHtml(g.name)}</span>
         ${g.nonSellable ? `<span class="badge badge-neutral">غیرقابل فروش</span>` : ""}
-        ${g.sellByUnit ? `<span class="badge badge-neutral">فروش به قوطی</span>` : ""}
         <span class="count">${productCountForGroup(g.id)} کالا</span>
         <div class="move-btns">
           <button class="btn btn-icon btn-sm btn-secondary" data-move="up" data-id="${g.id}" ${idx === 0 ? "disabled" : ""}>▲</button>
           <button class="btn btn-icon btn-sm btn-secondary" data-move="down" data-id="${g.id}" ${idx === sorted.length - 1 ? "disabled" : ""}>▼</button>
         </div>
-        <button class="btn btn-sm btn-secondary" data-toggle-sellbyunit="${g.id}">${g.sellByUnit ? "بازگشت به کارتن" : "فروش به قوطی"}</button>
         <button class="btn btn-sm btn-secondary" data-toggle-nonsellable="${g.id}">${g.nonSellable ? "بازگشت به فروش عادی" : "غیرقابل فروش"}</button>
         <button class="btn btn-icon btn-sm btn-danger" data-delete-group="${g.id}">🗑</button>
       </div>`
@@ -386,10 +358,6 @@ function renderGroupsList() {
   // non-sellable toggle
   $all("[data-toggle-nonsellable]", slot).forEach((btn) => {
     btn.addEventListener("click", () => handleToggleGroupNonSellable(Number(btn.dataset.toggleNonsellable)));
-  });
-  // sell-by-unit toggle
-  $all("[data-toggle-sellbyunit]", slot).forEach((btn) => {
-    btn.addEventListener("click", () => handleToggleGroupSellByUnit(Number(btn.dataset.toggleSellbyunit)));
   });
   // open group products modal
   $all("[data-open-group]", slot).forEach((el) => {
@@ -639,7 +607,7 @@ async function handleProductsFileSelected(file) {
   let workbook;
   try {
     const buf = await file.arrayBuffer();
-    workbook = readWorkbookSmart(buf);
+    workbook = XLSX.read(buf, { type: "array" });
   } catch (err) {
     showToast("خطا در خواندن فایل", "error");
     return;
@@ -654,7 +622,6 @@ async function handleProductsFileSelected(file) {
   const dataRows = rows.slice(1); // skip header row
 
   let registered = 0, duplicate = 0, invalid = 0;
-  let blankRows = 0, missingFieldRows = 0, undefinedGroupRows = 0, invalidCartonRows = 0;
   const undefinedGroups = new Set();
   const groupNameToId = new Map(state.groups.map((g) => [g.name, g.id]));
   const seenCodes = new Set(state.products.map((p) => p.code));
@@ -662,18 +629,11 @@ async function handleProductsFileSelected(file) {
   for (const row of dataRows) {
     const code = normalizeStr(row.A);
     const groupName = normalizeStr(row.B);
-    const cartonRaw = normalizeStr(row.C);
     const carton = toPersianSafeNumber(row.C);
 
-    // Excel often applies formatting (borders/background) far below the
-    // real data, which stretches the sheet's used range and produces
-    // hundreds/thousands of phantom fully-empty rows. These are not real
-    // import attempts, so they're skipped silently instead of counted.
-    if (!code && !groupName && !cartonRaw) { blankRows++; continue; }
-
-    if (!code || !groupName) { invalid++; missingFieldRows++; continue; }
-    if (!groupNameToId.has(groupName)) { undefinedGroups.add(groupName); invalid++; undefinedGroupRows++; continue; }
-    if (isNaN(carton) || carton <= 0) { invalid++; invalidCartonRows++; continue; }
+    if (!code || !groupName) { invalid++; continue; }
+    if (!groupNameToId.has(groupName)) { undefinedGroups.add(groupName); invalid++; continue; }
+    if (isNaN(carton) || carton <= 0) { invalid++; continue; }
     if (seenCodes.has(code)) { duplicate++; continue; }
 
     const rec = { code, group: groupNameToId.get(groupName), cartonQty: carton };
@@ -688,11 +648,6 @@ async function handleProductsFileSelected(file) {
   renderProductsList();
   renderGroupsList();
 
-  const reasonLines = [];
-  if (missingFieldRows) reasonLines.push(`کد یا گروه کالا خالی: ${missingFieldRows.toLocaleString("fa-IR")} ردیف`);
-  if (undefinedGroupRows) reasonLines.push(`گروه تعریف‌نشده: ${undefinedGroupRows.toLocaleString("fa-IR")} ردیف`);
-  if (invalidCartonRows) reasonLines.push(`تعداد در کارتن نامعتبر (خالی، صفر یا منفی): ${invalidCartonRows.toLocaleString("fa-IR")} ردیف`);
-
   openModal({
     icon: registered > 0 ? "✅" : "⚠️",
     title: "نتیجه ورود کالا از Excel",
@@ -701,8 +656,7 @@ async function handleProductsFileSelected(file) {
         <div class="row-between"><span>تعداد ثبت‌شده</span><span class="badge badge-success">${registered.toLocaleString("fa-IR")}</span></div>
         <div class="row-between"><span>تعداد تکراری</span><span class="badge badge-warning">${duplicate.toLocaleString("fa-IR")}</span></div>
         <div class="row-between"><span>تعداد نامعتبر</span><span class="badge badge-danger">${invalid.toLocaleString("fa-IR")}</span></div>
-      </div>
-      ${reasonLines.length ? `<div class="field-hint" style="margin-top:var(--space-4);text-align:right">علت نامعتبر بودن:<br>${reasonLines.join("<br>")}</div>` : ""}`,
+      </div>`,
     listItems: undefinedGroups.size
       ? [`گروه‌های تعریف‌نشده: ${Array.from(undefinedGroups).join("، ")}`]
       : null,
@@ -909,134 +863,10 @@ async function handleSetFontScale(scale) {
 }
 
 /* ---------------------------------------------------------
-   9b. پشتیبان‌گیری — export / import all groups, products, and settings
-   --------------------------------------------------------- */
-function handleExportBackup() {
-  const payload = {
-    app: "SalesFlow",
-    backupVersion: 1,
-    exportedAt: new Date().toISOString(),
-    groups: state.groups,
-    products: state.products,
-    columnMap: state.columnMap,
-    lines: state.lines,
-    lineGroups: state.lineGroups,
-    fontScale: state.fontScale,
-  };
-  const json = JSON.stringify(payload, null, 2);
-  const blob = new Blob([json], { type: "application/json" });
-  const url = URL.createObjectURL(blob);
-  const dateStr = new Date().toISOString().slice(0, 10);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `salesflow-backup-${dateStr}.json`;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
-  showToast("فایل پشتیبان دانلود شد", "success");
-}
-
-async function handleImportBackupFile(file) {
-  if (!file) return;
-  let payload;
-  try {
-    const text = await file.text();
-    payload = JSON.parse(text);
-  } catch (err) {
-    showToast("فایل پشتیبان معتبر نیست", "error");
-    return;
-  }
-  if (!payload || !Array.isArray(payload.groups) || !Array.isArray(payload.products)) {
-    showToast("ساختار فایل پشتیبان معتبر نیست", "error");
-    return;
-  }
-
-  const ok = await confirmModal({
-    icon: "⚠️",
-    title: "بازیابی فایل پشتیبان",
-    body: "با این کار تمام گروه‌های کالا، کدهای کالا و تنظیمات فعلی حذف و با اطلاعات فایل پشتیبان جایگزین می‌شوند. این عملیات قابل بازگشت نیست. آیا مطمئن هستید؟",
-    confirmLabel: "بازیابی و جایگزینی",
-    confirmClass: "btn-danger",
-  });
-  if (!ok) return;
-
-  try {
-    await Store.clear("groups");
-    await Store.clear("products");
-    await Store.clear("settings");
-
-    for (const g of payload.groups) await Store.put("groups", g);
-    for (const p of payload.products) await Store.put("products", p);
-    if (payload.columnMap) await setSetting("columnMap", payload.columnMap);
-    if (payload.lines) await setSetting("lines", payload.lines);
-    if (payload.lineGroups) await setSetting("lineGroups", payload.lineGroups);
-    if (payload.fontScale) await setSetting("fontScale", payload.fontScale);
-
-    await hydrateState();
-    document.documentElement.style.setProperty("--font-scale", String(state.fontScale));
-
-    renderGroupsList();
-    renderProductsList();
-    populateManualGroupSelect();
-    renderLineGroupCheckboxes();
-    loadSettingsFormFromState();
-    populateSingleReportSelectors();
-    handleRemoveSalesFile();
-
-    showToast("بازیابی با موفقیت انجام شد", "success");
-  } catch (err) {
-    showToast("خطا در بازیابی فایل پشتیبان", "error");
-  }
-}
-
-/* ---------------------------------------------------------
    10. REPORT ENGINE
    --------------------------------------------------------- */
-/**
- * Many accounting/ERP systems (common with Iranian سیستم‌های حسابداری/فروش)
- * export a ".xls" file that is not actually a binary Excel file at all —
- * it's an HTML table saved with an .xls extension. SheetJS's real XLS/XLSX
- * binary reader can't make sense of that: it doesn't throw, it just returns
- * an empty/garbled sheet, which is exactly why every number came out as
- * zero. Opening it in Excel and using "Save As → xlsx" works because Excel
- * itself converts that HTML content into a real workbook first.
- *
- * This reads a short prefix of the file to detect that case and, if found,
- * decodes the full buffer as text (respecting a declared <meta charset>,
- * falling back through common encodings) and hands it to SheetJS's
- * HTML-table reader instead — so the person never has to do that manual
- * "open and re-save" step themselves.
- */
-function readWorkbookSmart(buf) {
-  const headPeek = new TextDecoder("iso-8859-1").decode(buf.slice(0, 4000));
-  const looksLikeHtml = /<html[\s>]|<table[\s>]|<!doctype html/i.test(headPeek);
-
-  if (!looksLikeHtml) {
-    return XLSX.read(buf, { type: "array" });
-  }
-
-  const charsetMatch = headPeek.match(/charset\s*=\s*["']?([\w-]+)/i);
-  const declaredEncoding = charsetMatch ? charsetMatch[1].toLowerCase() : null;
-  const candidates = [...new Set([declaredEncoding, "utf-8", "windows-1256", "windows-1252"].filter(Boolean))];
-
-  let text = null;
-  for (const enc of candidates) {
-    try {
-      const decoded = new TextDecoder(enc).decode(buf);
-      if (text === null) text = decoded; // keep the first successful decode as a fallback
-      if (!decoded.includes("\uFFFD")) { text = decoded; break; } // clean decode, no replacement chars
-    } catch (err) {
-      // unsupported encoding label — try the next candidate
-    }
-  }
-  if (text === null) text = new TextDecoder("utf-8").decode(buf);
-
-  return XLSX.read(text, { type: "string" });
-}
-
 function readWorkbookFromArrayBuffer(buf) {
-  return readWorkbookSmart(buf);
+  return XLSX.read(buf, { type: "array" });
 }
 
 function getFirstSheetInfo(workbook) {
@@ -1110,22 +940,12 @@ function computeSalesReport(rows, columnMap, lines, productMap, groupsById) {
     }
 
     const qty = toPersianSafeNumber(row[columnMap.qty]);
-    const productGroup = groupsById.get(product.group);
+    const cartonFromFile = toPersianSafeNumber(row[columnMap.carton]);
+    let cartonQty = 0;
+    if (!isNaN(cartonFromFile) && cartonFromFile > 0) cartonQty = cartonFromFile;
+    else if (product.cartonQty > 0) cartonQty = product.cartonQty;
 
-    let rowSales;
-    if (productGroup?.sellByUnit) {
-      // «فروش به قوطی» — این گروه بر اساس واحد کوچک (تعداد خام فروش) گزارش
-      // می‌شود، نه تقسیم بر تعداد در کارتن (برای کالاهایی با کارتن بزرگ
-      // که معمولاً به تعداد کم فروخته می‌شوند).
-      rowSales = !isNaN(qty) ? qty : 0;
-    } else {
-      const cartonFromFile = toPersianSafeNumber(row[columnMap.carton]);
-      let cartonQty = 0;
-      if (!isNaN(cartonFromFile) && cartonFromFile > 0) cartonQty = cartonFromFile;
-      else if (product.cartonQty > 0) cartonQty = product.cartonQty;
-      rowSales = cartonQty > 0 && !isNaN(qty) ? qty / cartonQty : 0;
-    }
-
+    const rowSales = cartonQty > 0 && !isNaN(qty) ? qty / cartonQty : 0;
     const g = product.group;
     result[lineKey].groupSums[g] = (result[lineKey].groupSums[g] || 0) + rowSales;
   }
@@ -1136,13 +956,7 @@ function computeSalesReport(rows, columnMap, lines, productMap, groupsById) {
 /**
  * Builds report rows in the exact order the user configured for this line
  * (section 8 UI — "تعریف گزارش کلی"), NOT the global group-management order.
- *
- * "مجموع" is the line's FULL sales — every sellable group's exact sum,
- * whether or not that group is included in this line's displayed rows —
- * not just a sum of the rows shown. Non-sellable ("غیرقابل فروش") groups
- * never enter groupSumsExact to begin with (computeSalesReport already
- * excludes them), so they're automatically left out of this total too.
- * "مجموع" is always rendered as the final row by the caller.
+ * "مجموع" is computed here but always rendered as the final row by the caller.
  */
 function buildLineReportRows(groupSumsExact, selectedGroupIds) {
   const rows = selectedGroupIds
@@ -1152,7 +966,7 @@ function buildLineReportRows(groupSumsExact, selectedGroupIds) {
       const exact = groupSumsExact[g.id] || 0;
       return { groupId: g.id, name: g.name, exact, rounded: Math.round(exact) };
     });
-  const totalExact = Object.values(groupSumsExact).reduce((sum, v) => sum + v, 0);
+  const totalExact = rows.reduce((sum, r) => sum + r.exact, 0);
   const totalRounded = Math.round(totalExact);
   return { rows, totalExact, totalRounded };
 }
@@ -1166,10 +980,8 @@ let lastUndefinedCodes = [];
 async function handleSalesFileSelected(file) {
   const statusEl = $("#sales-file-status");
   const dropEl = $("#sales-file-drop");
-  const removeBtn = $("#btn-remove-sales-file");
   statusEl.textContent = "";
   dropEl.classList.remove("has-file");
-  removeBtn.style.display = "none";
   currentSalesRows = null;
   $("#btn-generate-report").disabled = true;
   $("#sales-file-warning-slot").innerHTML = "";
@@ -1186,30 +998,10 @@ async function handleSalesFileSelected(file) {
     currentSalesRows = info;
     statusEl.textContent = "✅ فایل انتخاب شد";
     dropEl.classList.add("has-file");
-    removeBtn.style.display = "inline-flex";
     $("#btn-generate-report").disabled = false;
   } catch (err) {
     showToast("خطا در خواندن فایل", "error");
   }
-}
-
-function handleRemoveSalesFile() {
-  currentSalesRows = null;
-  lastUndefinedCodes = [];
-  $("#sales-file-input").value = "";
-  $("#sales-file-status").textContent = "";
-  $("#sales-file-drop").classList.remove("has-file");
-  $("#btn-remove-sales-file").style.display = "none";
-  $("#btn-generate-report").disabled = true;
-  $("#sales-file-warning-slot").innerHTML = "";
-  $("#undefined-codes-alert-slot").innerHTML = "";
-  $("#report-output").innerHTML = `
-    <div class="empty-state">
-      <div class="icon">📄</div>
-      <div class="title">هنوز گزارشی تولید نشده است</div>
-      <div>فایل فروش را انتخاب کرده و روی «تولید گزارش» کلیک کنید</div>
-    </div>`;
-  showToast("فایل حذف شد — می‌توانید فایل جدید انتخاب کنید", "success");
 }
 
 function showColumnValidationError(field) {
@@ -1286,7 +1078,7 @@ function renderLineReportCard(lineKey, lineLabel, dotClass, data) {
           (r) => `<tr class="${r.rounded === 0 ? "table-row-zero" : ""}"><td>${escapeHtml(r.name)}</td><td class="num">${formatNumber(r.rounded)}</td></tr>`
         )
         .join("")
-    : `<tr><td colspan="2" style="text-align:center;color:var(--color-text-faint)">هیچ گروهی برای نمایش در این لاین تعریف نشده است</td></tr>`;
+    : `<tr><td colspan="2" style="text-align:center;color:var(--color-text-faint)">هیچ گروهی برای این لاین تعریف نشده است</td></tr>`;
 
   return `
     <div class="line-block">
@@ -1299,11 +1091,11 @@ function renderLineReportCard(lineKey, lineLabel, dotClass, data) {
           <thead><tr><th>گروه کالا</th><th class="num">فروش</th></tr></thead>
           <tbody>
             ${rowsHtml}
-            <tr class="table-row-total"><td>مجموع</td><td class="num">${formatNumber(data.totalRounded)}</td></tr>
+            ${data.rows.length ? `<tr class="table-row-total"><td>مجموع</td><td class="num">${formatNumber(data.totalRounded)}</td></tr>` : ""}
           </tbody>
         </table>
       </div>
-      <button class="btn btn-secondary btn-sm" data-copy-line="${lineKey}">📋 کپی گزارش ${lineLabel}</button>
+      <button class="btn btn-secondary btn-sm" data-copy-line="${lineKey}" ${data.rows.length ? "" : "disabled"}>📋 کپی گزارش ${lineLabel}</button>
     </div>`;
 }
 
@@ -1410,7 +1202,6 @@ function bindNavigation() {
 function bindReportsView() {
   $("#btn-pick-sales-file").addEventListener("click", () => $("#sales-file-input").click());
   $("#sales-file-input").addEventListener("change", (e) => handleSalesFileSelected(e.target.files[0]));
-  $("#btn-remove-sales-file").addEventListener("click", handleRemoveSalesFile);
   $("#btn-generate-report").addEventListener("click", handleGenerateReport);
   $("#btn-single-report").addEventListener("click", handleSingleReport);
 }
@@ -1451,12 +1242,6 @@ function bindSettingsView() {
   $("#btn-save-lines").addEventListener("click", handleSaveLines);
   $all("#font-size-tabs .tab-btn").forEach((btn) => {
     btn.addEventListener("click", () => handleSetFontScale(Number(btn.dataset.fontScale)));
-  });
-  $("#btn-export-backup").addEventListener("click", handleExportBackup);
-  $("#btn-import-backup-trigger").addEventListener("click", () => $("#backup-file-input").click());
-  $("#backup-file-input").addEventListener("change", (e) => {
-    handleImportBackupFile(e.target.files[0]);
-    e.target.value = "";
   });
 }
 
