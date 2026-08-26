@@ -36,7 +36,7 @@
         <span class="icon">⚙️</span><span class="label">تنظیمات</span>
       </button>
     </nav>
-    <div class="sidebar-footer">سیستم گزارش فروش · نسخه ۱٫۰</div>
+    <div class="sidebar-footer">سیستم گزارش فروش · نسخه ۱٫۲</div>
   </aside>
 
   <!-- ===================== MAIN ===================== -->
@@ -67,7 +67,10 @@
             <div class="file-drop" id="sales-file-drop">
               <input type="file" id="sales-file-input" accept=".xlsx,.xls" style="display:none" />
               <button class="btn btn-secondary" id="btn-pick-sales-file">📁 انتخاب فایل فروش</button>
-              <div class="file-drop-status" id="sales-file-status"></div>
+              <div class="row" style="justify-content:center; margin-top:var(--space-3)" id="sales-file-status-row">
+                <div class="file-drop-status" id="sales-file-status"></div>
+                <button class="btn btn-ghost btn-sm" id="btn-remove-sales-file" style="display:none">🗑 حذف فایل و انتخاب فایل جدید</button>
+              </div>
             </div>
 
             <div id="sales-file-warning-slot"></div>
@@ -319,6 +322,21 @@
             <button class="tab-btn active" data-font-scale="1.1">متوسط · ۱۱۰٪</button>
             <button class="tab-btn" data-font-scale="1.2">بزرگ · ۱۲۰٪</button>
           </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <div class="card-title">پشتیبان‌گیری</div>
+              <div class="card-subtitle">از گروه‌های کالا، کدهای کالا و تمام تنظیمات یک فایل خروجی بگیرید یا آن را روی سیستم دیگری بازیابی کنید</div>
+            </div>
+          </div>
+          <div class="row" style="flex-wrap:wrap">
+            <button class="btn btn-secondary" id="btn-export-backup">⬇️ خروجی گرفتن از تنظیمات</button>
+            <button class="btn btn-secondary" id="btn-import-backup-trigger">⬆️ بازیابی از فایل پشتیبان</button>
+            <input type="file" id="backup-file-input" accept="application/json,.json" style="display:none" />
+          </div>
+          <div class="field-hint" style="margin-top:var(--space-3)">بازیابی از فایل پشتیبان، تمام اطلاعات فعلی را با اطلاعات فایل جایگزین می‌کند.</div>
         </div>
 
       </section>
