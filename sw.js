@@ -3,7 +3,7 @@
    by their fixed filenames (assets/icon-192.png, icon-512.png,
    favicon.png) — replacing their content later requires no change here. */
 
-const CACHE_VERSION = "salesflow-v8";
+const CACHE_VERSION = "salesflow-v9";
 const CORE_ASSETS = [
   "./",
   "./index.html",
@@ -18,6 +18,7 @@ const CORE_ASSETS = [
   "./assets/icon-192.png",
   "./assets/icon-512.png",
   "./assets/favicon.png",
+  "./assets/wave.svg",
 ];
 
 self.addEventListener("install", (event) => {

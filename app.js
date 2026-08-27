@@ -227,17 +227,9 @@ function productCountForGroup(groupId) {
 /* ---------------------------------------------------------
    5. Navigation
    --------------------------------------------------------- */
-const VIEW_META = {
-  reports: { title: "گزارش‌گیری", sub: "تولید گزارش فروش از فایل روزانه" },
-  management: { title: "مدیریت", sub: "گروه‌ها، کدهای کالا و تعریف گزارش کلی" },
-  settings: { title: "تنظیمات", sub: "پیکربندی ستون‌ها، لاین‌ها و ظاهر برنامه" },
-};
-
 function switchView(viewKey) {
   $all(".sidebar-nav-item").forEach((btn) => btn.classList.toggle("active", btn.dataset.view === viewKey));
   $all(".view").forEach((v) => v.classList.toggle("active", v.id === `view-${viewKey}`));
-  $("#topbar-title").textContent = VIEW_META[viewKey].title;
-  $("#topbar-sub").textContent = VIEW_META[viewKey].sub;
 }
 
 function switchManagementTab(tabKey) {
@@ -1199,7 +1191,7 @@ function buildLineReportRows(groupSumsDisplay, groupSumsCartonEquivalent, select
     .filter(Boolean)
     .map((g) => {
       const exact = groupSumsDisplay[g.id] || 0;
-      return { groupId: g.id, name: g.name, exact, rounded: Math.round(exact) };
+      return { groupId: g.id, name: g.name, exact, rounded: Math.round(exact), sellByUnit: !!g.sellByUnit };
     });
   const totalExact = Object.values(groupSumsCartonEquivalent).reduce((sum, v) => sum + v, 0);
   const totalRounded = Math.round(totalExact);
@@ -1331,9 +1323,10 @@ async function handleGenerateReport() {
 function renderLineReportCard(lineKey, lineLabel, dotClass, data) {
   const rowsHtml = data.rows.length
     ? data.rows
-        .map(
-          (r) => `<tr class="${r.rounded === 0 ? "table-row-zero" : ""}"><td>${escapeHtml(r.name)}</td><td class="num">${formatNumber(r.rounded)}</td></tr>`
-        )
+        .map((r) => {
+          const displayValue = r.sellByUnit ? `${formatNumber(r.rounded)} قوطی` : formatNumber(r.rounded);
+          return `<tr class="${r.rounded === 0 ? "table-row-zero" : ""}"><td>${escapeHtml(r.name)}</td><td class="num">${displayValue}</td></tr>`;
+        })
         .join("")
     : `<tr><td colspan="2" style="text-align:center;color:var(--color-text-faint)">هیچ گروهی برای نمایش در این لاین تعریف نشده است</td></tr>`;
 
@@ -1433,13 +1426,14 @@ function handleSingleReport() {
   const target = lineKey === "line1" ? line1 : line2;
   const exact = target.groupSumsDisplay[groupId] || 0;
   const rounded = Math.round(exact);
+  const displayValue = group.sellByUnit ? `${formatNumber(rounded)} قوطی` : formatNumber(rounded);
 
   out.innerHTML = `
     <div class="card" style="background:var(--color-surface-alt)">
       <div class="row-between">
         <span>لاین: <strong>${lineKey === "line1" ? "لاین یک" : "لاین دو"}</strong></span>
         <span>گروه: <strong>${escapeHtml(group.name)}</strong></span>
-        <span>تعداد فروش: <strong class="num">${formatNumber(rounded)}</strong></span>
+        <span>تعداد فروش: <strong class="num">${displayValue}</strong></span>
       </div>
     </div>`;
 }
